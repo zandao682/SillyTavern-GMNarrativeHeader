@@ -88,11 +88,11 @@ Open **Extensions → GM Narrative Header** and enter a format string in **Manua
 | `{conditions}` | Active conditions, comma-joined, or `None` |
 | `{inventory_count}` / `{inventory_max}` | Items carried / capacity (`inventory_max` / `bag_slots`) |
 | `{active_title}` | The currently active title |
-| `{titles}` / `{boons}` / `{abilities}` | Names by category (`abilities` = all non-title) |
+| `{titles}` / `{boons}` / `{abilities}` | Capability names by category (`titles` = exclusive category; `abilities` = static, non-exclusive) |
 | `{currency}` | All non-zero denominations, e.g. `14 gold, 8 silver` |
 | `{currency:denom}` | A single denomination's amount |
 | `{reputation:Faction Name}` | `Tier (standing)` for that faction |
-| `{skill_score:SkillName}` | Calculated skill score (uses the system definition's formula when not set per-chat) |
+| `{skill_score:SkillName}` | A progressing capability's score (read from its precomputed `prog.score`) |
 | `{xp_next}` | XP needed for next level (`xp_next` / `xp_to_next_level`) |
 
 Any token that can't be resolved is left untouched as `{token}`, making missing fields easy to spot.

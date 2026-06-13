@@ -1,5 +1,5 @@
 /**
- * GM Narrative Header — SillyTavern Extension  v0.0.2 (beta)
+ * GM Narrative Header — SillyTavern Extension  v0.0.3 (beta)
  *
  * Prepends a formatted status header to every GM (AI) message.
  * The header is populated from gm-lore-parser (v9) player-entity state in
@@ -10,9 +10,9 @@
  * (emitted by the GM/Architect card), which persists per-chat in chatMetadata.
  *
  * Reads the v9 shape: identity (name/class_/background), `values` + `schema`,
- * `skill_system`, `needs` meters, unified `abilities` (boon/title/passive/
- * trait/evolution), `reputation`, `currency`, `adventurer_rank`, and the
- * `system_def` ruleset (used for skill-score formulas when not set per-chat).
+ * `needs` meters, unified `capabilities` (boon/title/passive/trait/evolution/
+ * skill — static or progressing), `reputation`, `currency`, `adventurer_rank`,
+ * and the `system_def` ruleset (for exclusive-category / progression lookup).
  *
  * Example header template:
  *   Name: {name}   Title: {active_title}   Rank: {rank}
@@ -31,10 +31,10 @@
  *   {time} / {date}                     — world_time.display
  *   {conditions}                        — comma-joined conditions or "None"
  *   {inventory_count} / {inventory_max} — inventory size / capacity
- *   {active_title} {titles} {boons} {abilities} — unified abilities by category
+ *   {active_title} {titles} {boons} {abilities} — capabilities by category
  *   {currency} / {currency:denom}       — all coin, or one denomination
  *   {reputation:Faction Name}           — "Tier (standing)"
- *   {skill_score:SkillName}             — calculated skill score (system-def aware)
+ *   {skill_score:SkillName}             — progressing capability's score
  *   {xp_next}                           — XP to next level (if the system tracks it)
  *
  * The header is prepended to the AI message text so it appears in-narrative.
@@ -42,7 +42,7 @@
  */
 
 const MODULE_NAME = 'gm-narrative-header';
-const VERSION     = '0.0.2';
+const VERSION     = '0.0.3';
 const LORE_PARSER = 'gm-lore-parser'; // sibling extension's metadata key
 
 const HEADER_BLOCK = {
@@ -110,14 +110,22 @@ function formatRegen(rpmFloat) {
 
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
+/** Does this capability advance (skill-like) under the active System Definition? */
+function capIsProgressing(cap, def) {
+    const id = cap.progression_id || def?.capabilities?.category_progression?.[cap.category] || 'none';
+    const p  = (def?.progressions || []).find(x => x.id === id);
+    return !!(p && p.type && p.type !== 'none');
+}
+
 function resolveToken(token, charState) {
     if (!charState) return `{${token}}`;
     const values     = charState.values || {};
     const schema     = charState.schema?.fields || {};
-    const ss         = charState.skill_system;
     const def        = charState.system_def || null;
     const needs      = charState.needs || {};
-    const abilities  = Array.isArray(charState.abilities) ? charState.abilities : [];
+    const caps       = (charState.capabilities && typeof charState.capabilities === 'object')
+        ? Object.values(charState.capabilities).filter(c => (c.entity_slug || 'player') === 'player') : [];
+    const exCat      = def?.capabilities?.exclusive_category || 'title';
     const emptyLabel = def?.presentation?.empty_label || 'None';
 
     // ── Identity (lives at the top level of the player entity, not in values) ──
@@ -140,18 +148,17 @@ function resolveToken(token, charState) {
     if (token === 'inventory_max')
         return def?.inventory?.capacity ?? values.inventory_max ?? values.bag_slots ?? '?';
 
-    // ── Abilities (unified: boon | title | passive | trait | evolution) ──
-    const ownAbilities = abilities.filter(a => (a.entity_slug || 'player') === 'player');
+    // ── Capabilities (unified: boon | title | passive | trait | evolution | skill) ──
     if (token === 'active_title') {
-        const t = ownAbilities.find(a => a.category === 'title' && a.active);
+        const t = caps.find(c => c.category === exCat && c.active);
         return t ? t.name : '—';
     }
     if (token === 'titles')
-        return ownAbilities.filter(a => a.category === 'title').map(a => a.name).join(', ') || emptyLabel;
+        return caps.filter(c => c.category === exCat).map(c => c.name).join(', ') || emptyLabel;
     if (token === 'boons')
-        return ownAbilities.filter(a => a.category === 'boon').map(a => a.name).join(', ') || emptyLabel;
+        return caps.filter(c => c.category === 'boon').map(c => c.name).join(', ') || emptyLabel;
     if (token === 'abilities')
-        return ownAbilities.filter(a => a.category !== 'title').map(a => a.name).join(', ') || emptyLabel;
+        return caps.filter(c => c.category !== exCat && !capIsProgressing(c, def)).map(c => c.name).join(', ') || emptyLabel;
 
     // ── Currency: {currency} (all denominations) or {currency:gold} ──
     if (token === 'currency') {
@@ -172,21 +179,13 @@ function resolveToken(token, charState) {
         return rep ? `${rep.tier} (${rep.standing})` : '?';
     }
 
-    // ── Skill score: {skill_score:Swordsmanship} (system-definition aware) ──
-    if (token.startsWith('skill_score:') && ss) {
-        const skillName = token.slice(12).trim().toLowerCase().replace(/\s+/g, '-');
-        const skill     = ss.skills?.[skillName];
-        if (!skill) return '?';
-        const lpt = ss.levels_per_tier || def?.skills?.levels_per_tier || 10;
-        const totalLevels = Object.values(ss.skills).reduce((acc, s) => acc + (s.tier_idx * lpt + s.level + 1), 0);
-        const skillLevel  = skill.tier_idx * lpt + skill.level;
-        const formula = ss.score_formula || def?.skills?.score_formula || '10 + total_levels * 2.5';
-        try {
-            const expr = formula.replace(/total_levels/g, totalLevels).replace(/skill_level/g, skillLevel);
-            if (/^[\d\s\+\-\*\/\(\)\.]+$/.test(expr))
-                return Math.round(Function(`"use strict"; return (${expr})`)());
-        } catch {}
-        return '?';
+    // ── Skill score: {skill_score:Swordsmanship} ──
+    // The parser precomputes prog.score per its progression profile, so the
+    // header just reads it — no formula evaluation or system-specific math here.
+    if (token.startsWith('skill_score:')) {
+        const wanted = token.slice(12).trim().toLowerCase();
+        const cap = caps.find(c => (c.name || '').toLowerCase() === wanted);
+        return (cap && cap.prog && cap.prog.score !== undefined) ? cap.prog.score : '?';
     }
 
     // ── _regen suffix (schema regen rate per minute) ──
@@ -341,7 +340,7 @@ async function renderSettingsPanel() {
         <code>{time}</code> / <code>{date}</code> — in-world datetime<br>
         <code>{conditions}</code> — active conditions (comma-joined)<br>
         <code>{inventory_count}</code> / <code>{inventory_max}</code> — inventory<br>
-        <code>{active_title}</code> <code>{titles}</code> <code>{boons}</code> <code>{abilities}</code> — unified abilities<br>
+        <code>{active_title}</code> <code>{titles}</code> <code>{boons}</code> <code>{abilities}</code> — capabilities<br>
         <code>{currency}</code> / <code>{currency:gold}</code> — coin<br>
         <code>{reputation:Faction}</code> — standing &amp; tier<br>
         <code>{skill_score:SkillName}</code> — calculated skill score<br>

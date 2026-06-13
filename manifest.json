@@ -1,9 +1,9 @@
 {
     "display_name": "GM Narrative Header",
     "name": "gm-narrative-header",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "author": "Zandao",
-    "description": "Prepends a formatted in-narrative status header to every GM message, populated from the gm-lore-parser (v9) player-entity state. Resolves identity, schema fields, needs meters, unified abilities, currency, reputation, and skill scores. Header format is system-defined via a HEADER_FORMAT block or manually configured in settings.",
+    "description": "Prepends a formatted in-narrative status header to every GM message, populated from the gm-lore-parser (v9) player-entity state. Resolves identity, schema fields, needs meters, unified capabilities, currency, reputation, and skill scores. Header format is system-defined via a HEADER_FORMAT block or manually configured in settings.",
     "loading_order": 20,
     "requires": [],
     "optional": ["gm-lore-parser"],
