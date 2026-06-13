@@ -1,14 +1,15 @@
 {
     "display_name": "GM Narrative Header",
     "name": "gm-narrative-header",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "author": "Zandao",
-    "description": "Prepends a formatted in-narrative status header to every GM message, populated from the gm-lore-parser character state. Header format is system-defined via a HEADER_FORMAT block or manually configured in settings.",
+    "description": "Prepends a formatted in-narrative status header to every GM message, populated from the gm-lore-parser (v9) player-entity state. Resolves identity, schema fields, needs meters, unified abilities, currency, reputation, and skill scores. Header format is system-defined via a HEADER_FORMAT block or manually configured in settings.",
     "loading_order": 20,
     "requires": [],
     "optional": ["gm-lore-parser"],
     "js": "index.js",
     "css": "style.css",
+    "homePage": "https://github.com/zandao682/SillyTavern-GMNarrativeHeader",
     "auto_update": false,
     "minimum_client_version": "1.12.0"
 }

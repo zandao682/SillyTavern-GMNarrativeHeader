@@ -1,40 +1,48 @@
 /**
- * GM Narrative Header — SillyTavern Extension  v1.0.0
+ * GM Narrative Header — SillyTavern Extension  v2.0.0
  *
  * Prepends a formatted status header to every GM (AI) message.
- * The header is populated from gm-lore-parser's character state in chatMetadata.
+ * The header is populated from gm-lore-parser (v9) player-entity state in
+ * chatMetadata['gm-lore-parser']. State is read-only here — never mutated.
  *
- * Format is controlled by a template string where tokens like {hp}, {mp},
- * {name}, {time} etc. are replaced with live values.
+ * Format is a template string where {token} placeholders are replaced with live
+ * values. Systems define their own format via a [HEADER_FORMAT_BEGIN] block
+ * (emitted by the GM/Architect card), which persists per-chat in chatMetadata.
  *
- * Systems define their own format via a [HEADER_FORMAT_BEGIN] block emitted
- * by the GM or Architect card. The format persists in chatMetadata.
+ * Reads the v9 shape: identity (name/class_/background), `values` + `schema`,
+ * `skill_system`, `needs` meters, unified `abilities` (boon/title/passive/
+ * trait/evolution), `reputation`, `currency`, `adventurer_rank`, and the
+ * `system_def` ruleset (used for skill-score formulas when not set per-chat).
  *
- * Example Veridia header template:
- *   Name: {name}   Rank: {creature_rank}
- *   Race: {race}   Level: {level}   XP: {xp}/{xp_next}
- *   Date: {date}   Time: {time}
- *   HP: {hp}/{hp_max} ({hp_regen}/min)   MP: {mp}/{mp_max} ({mp_regen}/min)   Vigor: {vigor}/{vigor_max} ({vigor_regen}/min)
- *   Fatigue: {fatigue}%   Hunger: {hunger}%   Thirst: {thirst}%
- *   Status: {conditions}   Inventory: {inventory_count}/{inventory_max} Slots Used
+ * Example header template:
+ *   Name: {name}   Title: {active_title}   Rank: {rank}
+ *   Class: {class}   Level: {level}   XP: {xp}/{xp_next}
+ *   Date: {date}
+ *   HP: {hp}/{hp_max} ({hp_regen}/min)   MP: {mp}/{mp_max} ({mp_regen}/min)
+ *   Hunger: {hunger_pct}%   Thirst: {thirst_pct}%
+ *   Status: {conditions}   Coin: {currency}   Inventory: {inventory_count} items
  *
  * Tokens:
- *   {field_key}           — value of that field from character state
- *   {field_key_max}       — max value of that field (from max_field in schema)
- *   {field_key_regen}     — regen rate per minute for that field
- *   {time}                — world_time.display
- *   {date}                — world_time.display (alias)
- *   {inventory_count}     — number of items in inventory
- *   {inventory_max}       — max inventory slots (if defined in schema)
- *   {conditions}          — comma-joined conditions list or "None"
- *   {skill_score:SkillName} — skill score for a named skill (from gm-lore-parser)
+ *   {name} {class} {background} {rank}  — player identity / adventurer rank
+ *   {field_key}                         — a schema field value (or a needs meter value)
+ *   {field_key_max}                     — max (schema max_field, or needs meter max)
+ *   {field_key_regen}                   — schema regen rate per minute, signed
+ *   {field_key_pct}                     — percentage for a needs meter (or max_field pair)
+ *   {time} / {date}                     — world_time.display
+ *   {conditions}                        — comma-joined conditions or "None"
+ *   {inventory_count} / {inventory_max} — inventory size / capacity
+ *   {active_title} {titles} {boons} {abilities} — unified abilities by category
+ *   {currency} / {currency:denom}       — all coin, or one denomination
+ *   {reputation:Faction Name}           — "Tier (standing)"
+ *   {skill_score:SkillName}             — calculated skill score (system-def aware)
+ *   {xp_next}                           — XP to next level (if the system tracks it)
  *
  * The header is prepended to the AI message text so it appears in-narrative.
  * It can be toggled per-conversation or globally.
  */
 
 const MODULE_NAME = 'gm-narrative-header';
-const VERSION     = '1.0.0';
+const VERSION     = '2.0.0';
 const LORE_PARSER = 'gm-lore-parser'; // sibling extension's metadata key
 
 const HEADER_BLOCK = {
@@ -104,9 +112,18 @@ function formatRegen(rpmFloat) {
 
 function resolveToken(token, charState) {
     if (!charState) return `{${token}}`;
-    const values = charState.values || {};
-    const schema = charState.schema?.fields || {};
-    const ss     = charState.skill_system;
+    const values     = charState.values || {};
+    const schema     = charState.schema?.fields || {};
+    const ss         = charState.skill_system;
+    const def        = charState.system_def || null;
+    const needs      = charState.needs || {};
+    const abilities  = Array.isArray(charState.abilities) ? charState.abilities : [];
+
+    // ── Identity (lives at the top level of the player entity, not in values) ──
+    if (token === 'name')       return charState.name       || '—';
+    if (token === 'class')      return charState.class_      || '—';
+    if (token === 'background') return charState.background  || '—';
+    if (token === 'rank')       return charState.adventurer_rank?.rank || '—';
 
     // Special tokens
     if (token === 'time' || token === 'date')
@@ -119,51 +136,95 @@ function resolveToken(token, charState) {
     if (token === 'inventory_count')
         return Array.isArray(values.inventory) ? values.inventory.length : 0;
 
-    if (token === 'inventory_max') {
-        // Look for a schema field named inventory_max or similar
+    if (token === 'inventory_max')
         return values.inventory_max || values.bag_slots || '?';
+
+    // ── Abilities (unified: boon | title | passive | trait | evolution) ──
+    const ownAbilities = abilities.filter(a => (a.entity_slug || 'player') === 'player');
+    if (token === 'active_title') {
+        const t = ownAbilities.find(a => a.category === 'title' && a.active);
+        return t ? t.name : '—';
+    }
+    if (token === 'titles')
+        return ownAbilities.filter(a => a.category === 'title').map(a => a.name).join(', ') || 'None';
+    if (token === 'boons')
+        return ownAbilities.filter(a => a.category === 'boon').map(a => a.name).join(', ') || 'None';
+    if (token === 'abilities')
+        return ownAbilities.filter(a => a.category !== 'title').map(a => a.name).join(', ') || 'None';
+
+    // ── Currency: {currency} (all denominations) or {currency:gold} ──
+    if (token === 'currency') {
+        const c = charState.currency || {};
+        const parts = Object.entries(c).filter(([, v]) => v > 0).map(([d, v]) => `${v} ${d}`);
+        return parts.length ? parts.join(', ') : '—';
+    }
+    if (token.startsWith('currency:')) {
+        const denom = token.slice(9).trim().toLowerCase();
+        return charState.currency?.[denom] ?? 0;
     }
 
-    // Skill score: {skill_score:Swordsmanship}
+    // ── Reputation: {reputation:Faction Name} → "Tier (standing)" ──
+    if (token.startsWith('reputation:')) {
+        const wanted = token.slice(11).trim().toLowerCase();
+        const rep = Object.values(charState.reputation || {})
+            .find(r => (r.name || '').toLowerCase() === wanted);
+        return rep ? `${rep.tier} (${rep.standing})` : '?';
+    }
+
+    // ── Skill score: {skill_score:Swordsmanship} (system-definition aware) ──
     if (token.startsWith('skill_score:') && ss) {
-        const skillName = token.slice(12).trim().toLowerCase().replace(/\s+/g,'-');
+        const skillName = token.slice(12).trim().toLowerCase().replace(/\s+/g, '-');
         const skill     = ss.skills?.[skillName];
         if (!skill) return '?';
-        const totalLevels = Object.values(ss.skills).reduce((acc, s) => acc + (s.tier_idx * (ss.levels_per_tier||10) + s.level + 1), 0);
+        const lpt = ss.levels_per_tier || def?.skills?.levels_per_tier || 10;
+        const totalLevels = Object.values(ss.skills).reduce((acc, s) => acc + (s.tier_idx * lpt + s.level + 1), 0);
+        const skillLevel  = skill.tier_idx * lpt + skill.level;
+        const formula = ss.score_formula || def?.skills?.score_formula || '10 + total_levels * 2.5';
         try {
-            const formula = (ss.score_formula || '10 + total_levels * 2.5').replace(/total_levels/g, totalLevels);
-            if (/^[\d\s\+\-\*\/\(\)\.]+$/.test(formula))
-                return Math.round(Function(`"use strict"; return (${formula})`)());
+            const expr = formula.replace(/total_levels/g, totalLevels).replace(/skill_level/g, skillLevel);
+            if (/^[\d\s\+\-\*\/\(\)\.]+$/.test(expr))
+                return Math.round(Function(`"use strict"; return (${expr})`)());
         } catch {}
         return '?';
     }
 
-    // _regen suffix
+    // ── _regen suffix (schema regen rate per minute) ──
     if (token.endsWith('_regen')) {
         const baseKey = token.slice(0, -6);
-        const desc    = schema[baseKey];
-        return formatRegen(regenPerMinute(desc));
+        return formatRegen(regenPerMinute(schema[baseKey]));
     }
 
-    // _max suffix (find via max_field reference)
+    // ── _pct suffix (needs meter percentage) ──
+    if (token.endsWith('_pct')) {
+        const baseKey = token.slice(0, -4);
+        const meter = needs[baseKey];
+        if (meter && meter.max) return Math.round((meter.value / meter.max) * 100);
+        if (values[baseKey] !== undefined && schema[baseKey]?.max_field)
+            return Math.round((values[baseKey] / (values[schema[baseKey].max_field] || 1)) * 100);
+        return '?';
+    }
+
+    // ── _max suffix (schema max_field, direct value, or needs meter max) ──
     if (token.endsWith('_max')) {
         const baseKey = token.slice(0, -4);
-        // Direct value
         if (values[token] !== undefined) return values[token];
-        // From schema max_field
         const desc = schema[baseKey];
         if (desc?.max_field) return values[desc.max_field] ?? '?';
+        if (needs[baseKey]) return needs[baseKey].max ?? '?';
         return '?';
     }
 
     // xp_next — XP needed for next level (system must define this or GM sets it)
     if (token === 'xp_next') return values.xp_next ?? values.xp_to_next_level ?? '?';
 
-    // Direct field lookup
+    // Direct schema-value lookup
     if (values[token] !== undefined) {
         const v = values[token];
         return Array.isArray(v) ? v.join(', ') : v;
     }
+
+    // Needs meter value (when modeled as a separate meter, not a schema field)
+    if (needs[token] !== undefined) return needs[token].value;
 
     // Not found
     return `{${token}}`;
@@ -271,12 +332,17 @@ async function renderSettingsPanel() {
 
       <div class="gnh-info">
         <b>Token reference:</b><br>
-        <code>{field_key}</code> — any schema field value<br>
-        <code>{field_key_max}</code> — field maximum<br>
-        <code>{field_key_regen}</code> — regen rate per minute<br>
-        <code>{time}</code> or <code>{date}</code> — in-world datetime<br>
+        <code>{name}</code> <code>{class}</code> <code>{background}</code> <code>{rank}</code> — identity &amp; rank<br>
+        <code>{field_key}</code> — any schema field (or needs-meter) value<br>
+        <code>{field_key_max}</code> — maximum (schema max_field or meter max)<br>
+        <code>{field_key_regen}</code> — regen rate per minute (signed)<br>
+        <code>{field_key_pct}</code> — needs-meter percentage<br>
+        <code>{time}</code> / <code>{date}</code> — in-world datetime<br>
         <code>{conditions}</code> — active conditions (comma-joined)<br>
-        <code>{inventory_count}</code> — items in inventory<br>
+        <code>{inventory_count}</code> / <code>{inventory_max}</code> — inventory<br>
+        <code>{active_title}</code> <code>{titles}</code> <code>{boons}</code> <code>{abilities}</code> — unified abilities<br>
+        <code>{currency}</code> / <code>{currency:gold}</code> — coin<br>
+        <code>{reputation:Faction}</code> — standing &amp; tier<br>
         <code>{skill_score:SkillName}</code> — calculated skill score<br>
         <code>{xp_next}</code> — XP to next level
       </div>

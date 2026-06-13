@@ -1,19 +1,30 @@
 # GM Narrative Header
 
-A [SillyTavern](https://github.com/SillyTavern/SillyTavern) extension that prepends a formatted, in-narrative **status header** to every GM (AI) message — HP/MP bars, world time, conditions, inventory, skills, and anything else your system tracks.
+A [SillyTavern](https://github.com/SillyTavern/SillyTavern) extension that prepends a formatted, in-narrative **status header** to every GM (AI) message — HP/MP, world time, conditions, inventory, abilities, and anything else your system tracks.
 
-The header is populated live from the [`gm-lore-parser`](project-gm-lore-parser-architecture.md) character state stored in `chatMetadata`, so the numbers always reflect the current world.
+The header is populated live from the [`gm-lore-parser`](https://github.com/zandao682/SillyTavern-GMLoreParser) player-entity state stored in `chatMetadata`, so the numbers always reflect the current world.
 
 ```
-Name: Kaelen   Rank: Bronze
-Race: Half-Elf   Level: 7   XP: 1840/2400
-Date: 14th of Frostmoon, 1042   Time: Dusk
+Name: Kaelen   Title: Dawnbreaker   Rank: B
+Class: Spellblade   Level: 7   XP: 1840/2400
+Date: 14th of Frostmoon, 1042 — Dusk
 HP: 78/120 (+1.5/min)   MP: 40/60 (+0.5/min)   Vigor: 90/100 (+2/min)
-Fatigue: 18%   Hunger: 32%   Thirst: 25%
-Status: Bleeding, Inspired   Inventory: 14/30 Slots Used
+Hunger: 68%   Thirst: 75%
+Status: Bleeding, Inspired   Coin: 14 gold, 8 silver   Inventory: 14 items
 ---
 The tavern door groans open behind you...
 ```
+
+---
+
+## What's new in v2
+
+v2 follows the **gm-lore-parser v9** (system-agnostic) spec:
+
+- Reads the unified **player-entity** shape — identity (`name` / `class` / `background`), `values` + `schema`, `skill_system`, `needs` meters, and the `adventurer_rank`.
+- Resolves the unified **abilities** list (`boon` / `title` / `passive` / `trait` / `evolution`) — including the active title.
+- New tokens for **currency**, **reputation**, and **needs-meter percentages**.
+- Skill-score tokens are **system-definition aware**: they use the ruleset's `score_formula` (from `[SYSTEM_DEF]`) when no per-chat formula is set.
 
 ---
 
@@ -22,9 +33,9 @@ The tavern door groans open behind you...
 - **Live status block** prepended to every GM message, rendered in-narrative.
 - **System-defined format** — the GM/Architect card emits a `[HEADER_FORMAT_BEGIN]…[HEADER_FORMAT_END]` block once, and the format persists per-chat in `chatMetadata`.
 - **Manual fallback format** configurable in the extension settings panel.
-- **Rich token language** — fields, maxes, regen rates, world time, conditions, inventory counts, and calculated skill scores.
+- **Rich token language** — identity, fields, maxes, regen rates, needs percentages, world time, conditions, inventory, currency, reputation, abilities, and calculated skill scores.
 - **Configurable separator** between the header and the narration.
-- Pulls all state from `gm-lore-parser` (optional dependency) — no extra bookkeeping required.
+- Pulls all state from `gm-lore-parser` (optional dependency) — read-only, no extra bookkeeping.
 
 ---
 
@@ -42,7 +53,7 @@ The tavern door groans open behind you...
 | | |
 |---|---|
 | Minimum client version | `1.12.0` |
-| Optional dependency | [`gm-lore-parser`](project-gm-lore-parser-architecture.md) (provides the character state the header reads) |
+| Optional dependency | [`gm-lore-parser`](https://github.com/zandao682/SillyTavern-GMLoreParser) (provides the player-entity state the header reads) |
 | Loading order | `20` (loads after the lore parser) |
 
 Without `gm-lore-parser` installed the header still renders, but unresolved tokens are left as literal `{token}` text.
@@ -57,13 +68,16 @@ Have your GM or Architect card emit a header-format block **once** in a message.
 
 ```
 [HEADER_FORMAT_BEGIN]
-Name: {name}   Rank: {creature_rank}
-Race: {race}   Level: {level}   XP: {xp}/{xp_next}
-Date: {date}   Time: {time}
+Name: {name}   Title: {active_title}   Rank: {rank}
+Class: {class}   Level: {level}   XP: {xp}/{xp_next}
+Date: {date}
 HP: {hp}/{hp_max} ({hp_regen}/min)   MP: {mp}/{mp_max} ({mp_regen}/min)
-Status: {conditions}   Inventory: {inventory_count}/{inventory_max} Slots Used
+Hunger: {hunger_pct}%   Thirst: {thirst_pct}%
+Status: {conditions}   Coin: {currency}   Inventory: {inventory_count} items
 [HEADER_FORMAT_END]
 ```
+
+Only reference tokens for fields and subsystems your system actually defines — a levelless or classless system simply omits `{level}` / `{class}`.
 
 ### 2. Or set a manual format
 
@@ -75,15 +89,22 @@ Open **Extensions → GM Narrative Header** and enter a format string in **Manua
 
 | Token | Resolves to |
 |---|---|
-| `{field_key}` | The value of any field in the character state (arrays are comma-joined) |
-| `{field_key_max}` | The field's maximum (via the schema's `max_field`) |
-| `{field_key_regen}` | Regen rate **per minute**, signed (e.g. `+1.5`, `-0.5`) — normalized from hour/day rates |
+| `{name}` / `{class}` / `{background}` | Player identity (top-level entity fields) |
+| `{rank}` | Adventurer / guild rank |
+| `{field_key}` | A schema field value, or a needs-meter value (arrays are comma-joined) |
+| `{field_key_max}` | The maximum — schema `max_field`, or a needs meter's max |
+| `{field_key_regen}` | Schema regen rate **per minute**, signed (e.g. `+1.5`, `-0.5`) — normalized from hour/day rates |
+| `{field_key_pct}` | Percentage for a needs meter (or a value/max_field pair) |
 | `{time}` / `{date}` | `world_time.display` from the lore parser |
 | `{conditions}` | Active conditions, comma-joined, or `None` |
-| `{inventory_count}` | Number of items in inventory |
-| `{inventory_max}` | Max inventory slots (`inventory_max` / `bag_slots`, else `?`) |
+| `{inventory_count}` / `{inventory_max}` | Items carried / capacity (`inventory_max` / `bag_slots`) |
+| `{active_title}` | The currently active title |
+| `{titles}` / `{boons}` / `{abilities}` | Names by category (`abilities` = all non-title) |
+| `{currency}` | All non-zero denominations, e.g. `14 gold, 8 silver` |
+| `{currency:denom}` | A single denomination's amount |
+| `{reputation:Faction Name}` | `Tier (standing)` for that faction |
+| `{skill_score:SkillName}` | Calculated skill score (uses the system definition's formula when not set per-chat) |
 | `{xp_next}` | XP needed for next level (`xp_next` / `xp_to_next_level`) |
-| `{skill_score:SkillName}` | Calculated skill score from `gm-lore-parser`'s skill system |
 
 Any token that can't be resolved is left untouched as `{token}`, making missing fields easy to spot.
 
@@ -107,7 +128,7 @@ Found under **Extensions → GM Narrative Header**:
 
 1. On `MESSAGE_RECEIVED`, the extension inspects each GM message.
 2. If the message contains a `[HEADER_FORMAT_BEGIN]…[HEADER_FORMAT_END]` block, that format is saved to `chatMetadata[gm-narrative-header]` and the block is stripped from the visible text.
-3. The active format (captured block, or manual fallback) is rendered by replacing every `{token}` against the live `gm-lore-parser` state in `chatMetadata[gm-lore-parser]`.
+3. The active format (captured block, or manual fallback) is rendered by replacing every `{token}` against the live `gm-lore-parser` player-entity state in `chatMetadata[gm-lore-parser]`.
 4. The rendered header + separator is prepended to `message.mes` and re-rendered into the DOM via SillyTavern's `messageFormatting`.
 
 State is read-only from the header's perspective — it never mutates the lore parser's data, only reads it.
