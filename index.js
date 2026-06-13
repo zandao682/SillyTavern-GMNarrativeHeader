@@ -1,5 +1,5 @@
 /**
- * GM Narrative Header — SillyTavern Extension  v0.0.3 (beta)
+ * GM Narrative Header — SillyTavern Extension  v0.0.4 (beta)
  *
  * Prepends a formatted status header to every GM (AI) message.
  * The header is populated from gm-lore-parser (v9) player-entity state in
@@ -39,10 +39,15 @@
  *
  * The header is prepended to the AI message text so it appears in-narrative.
  * It can be toggled per-conversation or globally.
+ *
+ * Missing/unknown tokens resolve to nothing (never a literal {token}); a line
+ * whose tokens ALL resolve empty is dropped, and leftover artifacts (orphan "/",
+ * empty "()", stray separators) are tidied. Put one stat per line for the
+ * cleanest auto-hiding of absent data.
  */
 
 const MODULE_NAME = 'gm-narrative-header';
-const VERSION     = '0.0.3';
+const VERSION     = '0.0.4';
 const LORE_PARSER = 'gm-lore-parser'; // sibling extension's metadata key
 
 const HEADER_BLOCK = {
@@ -117,8 +122,10 @@ function capIsProgressing(cap, def) {
     return !!(p && p.type && p.type !== 'none');
 }
 
+// Genuinely-missing/unknown data resolves to this empty sentinel; renderHeader
+// then strips it (and drops any line whose tokens all came back empty).
 function resolveToken(token, charState) {
-    if (!charState) return `{${token}}`;
+    if (!charState) return '';
     const values     = charState.values || {};
     const schema     = charState.schema?.fields || {};
     const def        = charState.system_def || null;
@@ -129,14 +136,14 @@ function resolveToken(token, charState) {
     const emptyLabel = def?.presentation?.empty_label || 'None';
 
     // ── Identity (lives at the top level of the player entity, not in values) ──
-    if (token === 'name')       return charState.name       || '—';
-    if (token === 'class')      return charState.class_      || '—';
-    if (token === 'background') return charState.background  || '—';
-    if (token === 'rank')       return charState.adventurer_rank?.rank || '—';
+    if (token === 'name')       return charState.name       || '';
+    if (token === 'class')      return charState.class_      || '';
+    if (token === 'background') return charState.background  || '';
+    if (token === 'rank')       return charState.adventurer_rank?.rank || '';
 
     // Special tokens
     if (token === 'time' || token === 'date')
-        return charState.world_time?.display || '—';
+        return charState.world_time?.display || '';
 
     if (token === 'conditions')
         return (Array.isArray(values.conditions) && values.conditions.length)
@@ -146,12 +153,12 @@ function resolveToken(token, charState) {
         return Array.isArray(values.inventory) ? values.inventory.length : 0;
 
     if (token === 'inventory_max')
-        return def?.inventory?.capacity ?? values.inventory_max ?? values.bag_slots ?? '?';
+        return def?.inventory?.capacity ?? values.inventory_max ?? values.bag_slots ?? '';
 
     // ── Capabilities (unified: boon | title | passive | trait | evolution | skill) ──
     if (token === 'active_title') {
         const t = caps.find(c => c.category === exCat && c.active);
-        return t ? t.name : '—';
+        return t ? t.name : '';
     }
     if (token === 'titles')
         return caps.filter(c => c.category === exCat).map(c => c.name).join(', ') || emptyLabel;
@@ -164,7 +171,7 @@ function resolveToken(token, charState) {
     if (token === 'currency') {
         const c = charState.currency || {};
         const parts = Object.entries(c).filter(([, v]) => v > 0).map(([d, v]) => `${v} ${d}`);
-        return parts.length ? parts.join(', ') : '—';
+        return parts.length ? parts.join(', ') : '';
     }
     if (token.startsWith('currency:')) {
         const denom = token.slice(9).trim().toLowerCase();
@@ -176,7 +183,7 @@ function resolveToken(token, charState) {
         const wanted = token.slice(11).trim().toLowerCase();
         const rep = Object.values(charState.reputation || {})
             .find(r => (r.name || '').toLowerCase() === wanted);
-        return rep ? `${rep.tier} (${rep.standing})` : '?';
+        return rep ? `${rep.tier} (${rep.standing})` : '';
     }
 
     // ── Skill score: {skill_score:Swordsmanship} ──
@@ -185,13 +192,14 @@ function resolveToken(token, charState) {
     if (token.startsWith('skill_score:')) {
         const wanted = token.slice(12).trim().toLowerCase();
         const cap = caps.find(c => (c.name || '').toLowerCase() === wanted);
-        return (cap && cap.prog && cap.prog.score !== undefined) ? cap.prog.score : '?';
+        return (cap && cap.prog && cap.prog.score !== undefined) ? cap.prog.score : '';
     }
 
     // ── _regen suffix (schema regen rate per minute) ──
     if (token.endsWith('_regen')) {
         const baseKey = token.slice(0, -6);
-        return formatRegen(regenPerMinute(schema[baseKey]));
+        const rpm = regenPerMinute(schema[baseKey]);
+        return rpm ? formatRegen(rpm) : '';   // hide when the field has no regen
     }
 
     // ── _pct suffix (needs meter percentage) ──
@@ -201,7 +209,7 @@ function resolveToken(token, charState) {
         if (meter && meter.max) return Math.round((meter.value / meter.max) * 100);
         if (values[baseKey] !== undefined && schema[baseKey]?.max_field)
             return Math.round((values[baseKey] / (values[schema[baseKey].max_field] || 1)) * 100);
-        return '?';
+        return '';
     }
 
     // ── _max suffix (schema max_field, direct value, or needs meter max) ──
@@ -209,13 +217,13 @@ function resolveToken(token, charState) {
         const baseKey = token.slice(0, -4);
         if (values[token] !== undefined) return values[token];
         const desc = schema[baseKey];
-        if (desc?.max_field) return values[desc.max_field] ?? '?';
-        if (needs[baseKey]) return needs[baseKey].max ?? '?';
-        return '?';
+        if (desc?.max_field) return values[desc.max_field] ?? '';
+        if (needs[baseKey]) return needs[baseKey].max ?? '';
+        return '';
     }
 
     // xp_next — XP needed for next level (system must define this or GM sets it)
-    if (token === 'xp_next') return values.xp_next ?? values.xp_to_next_level ?? '?';
+    if (token === 'xp_next') return values.xp_next ?? values.xp_to_next_level ?? '';
 
     // Direct schema-value lookup
     if (values[token] !== undefined) {
@@ -226,14 +234,41 @@ function resolveToken(token, charState) {
     // Needs meter value (when modeled as a separate meter, not a schema field)
     if (needs[token] !== undefined) return needs[token].value;
 
-    // Not found
-    return `{${token}}`;
+    // Not found → empty (hidden), never a literal {token}
+    return '';
+}
+
+/** Tidy artifacts left behind when a token resolved to empty on a populated line:
+ *  orphaned slashes, empty brackets/parens, doubled spaces, dangling separators. */
+function cleanupHeaderLine(s) {
+    return s
+        .replace(/\(\s*\)/g, '')                 // empty ()
+        .replace(/\[\s*\]/g, '')                 // empty []
+        .replace(/\s*\/\s*(?=\s|$)/g, '')        // trailing/orphan slash
+        .replace(/(^|[\s|·])\/\s*/g, '$1')       // leading orphan slash
+        .replace(/\s+([,;:|·])/g, '$1')          // space before separators
+        .replace(/([,;|·])\s*$/g, '')            // trailing separator
+        .replace(/\s{2,}/g, ' ')                 // collapse doubled spaces
+        .trimEnd();
 }
 
 function renderHeader(format, charState) {
     if (!format) return null;
-    // Replace all {token} patterns
-    return format.replace(/\{([^}]+)\}/g, (_, token) => resolveToken(token.trim(), charState));
+    const lines = format.split('\n').map(line => {
+        let hadToken = false, allEmpty = true;
+        const replaced = line.replace(/\{([^}]+)\}/g, (_, token) => {
+            hadToken = true;
+            const v = resolveToken(token.trim(), charState);
+            const s = (v === null || v === undefined) ? '' : String(v);
+            if (s !== '') allEmpty = false;
+            return s;
+        });
+        // Drop a line whose tokens ALL resolved empty (e.g. "MP {mp}/{mp_max}").
+        if (hadToken && allEmpty) return null;
+        return cleanupHeaderLine(replaced);
+    }).filter(l => l !== null && l.trim() !== '');
+    const result = lines.join('\n').trim();
+    return result || null;
 }
 
 // ─── Block parsing ────────────────────────────────────────────────────────────
