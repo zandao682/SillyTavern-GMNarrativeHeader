@@ -396,15 +396,12 @@ async function renderSettingsPanel() {
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
+//
+// ⚠ DEPRECATED — this extension has been merged into gm-lore-parser (v0.0.11+)
+// as the built-in narrative header (modules/header.js). To avoid prepending the
+// header twice, this standalone no longer registers any handlers. Disable/remove
+// this extension and use gm-lore-parser's Narrative Header settings instead.
 
 jQuery(async () => {
-    const { eventSource, event_types } = SillyTavern.getContext();
-    getSettings();
-
-    eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
-    eventSource.on(event_types.APP_READY, async () => {
-        await renderSettingsPanel();
-    });
-
-    console.log(`[${MODULE_NAME}] v${VERSION} loaded.`);
+    console.warn(`[${MODULE_NAME}] DEPRECATED — merged into gm-lore-parser (built-in narrative header). This extension is inert; please disable/remove it.`);
 });

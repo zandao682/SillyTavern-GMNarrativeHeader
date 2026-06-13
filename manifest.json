@@ -1,9 +1,9 @@
 {
-    "display_name": "GM Narrative Header",
+    "display_name": "GM Narrative Header (DEPRECATED — merged into GM Lore Parser)",
     "name": "gm-narrative-header",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "author": "Zandao",
-    "description": "Prepends a formatted in-narrative status header to every GM message, populated from the gm-lore-parser (v9) player-entity state. Resolves identity, schema fields, needs meters, unified capabilities, currency, reputation, and skill scores. Header format is system-defined via a HEADER_FORMAT block or manually configured in settings.",
+    "description": "DEPRECATED — merged into gm-lore-parser (v0.0.11+) as the built-in narrative header. This standalone is now inert; disable/remove it and use gm-lore-parser's Narrative Header settings instead.",
     "loading_order": 20,
     "requires": [],
     "optional": ["gm-lore-parser"],
