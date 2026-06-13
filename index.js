@@ -1,5 +1,5 @@
 /**
- * GM Narrative Header — SillyTavern Extension  v2.0.0
+ * GM Narrative Header — SillyTavern Extension  v0.0.2 (beta)
  *
  * Prepends a formatted status header to every GM (AI) message.
  * The header is populated from gm-lore-parser (v9) player-entity state in
@@ -42,7 +42,7 @@
  */
 
 const MODULE_NAME = 'gm-narrative-header';
-const VERSION     = '2.0.0';
+const VERSION     = '0.0.2';
 const LORE_PARSER = 'gm-lore-parser'; // sibling extension's metadata key
 
 const HEADER_BLOCK = {
@@ -118,6 +118,7 @@ function resolveToken(token, charState) {
     const def        = charState.system_def || null;
     const needs      = charState.needs || {};
     const abilities  = Array.isArray(charState.abilities) ? charState.abilities : [];
+    const emptyLabel = def?.presentation?.empty_label || 'None';
 
     // ── Identity (lives at the top level of the player entity, not in values) ──
     if (token === 'name')       return charState.name       || '—';
@@ -131,13 +132,13 @@ function resolveToken(token, charState) {
 
     if (token === 'conditions')
         return (Array.isArray(values.conditions) && values.conditions.length)
-            ? values.conditions.join(', ') : 'None';
+            ? values.conditions.join(', ') : emptyLabel;
 
     if (token === 'inventory_count')
         return Array.isArray(values.inventory) ? values.inventory.length : 0;
 
     if (token === 'inventory_max')
-        return values.inventory_max || values.bag_slots || '?';
+        return def?.inventory?.capacity ?? values.inventory_max ?? values.bag_slots ?? '?';
 
     // ── Abilities (unified: boon | title | passive | trait | evolution) ──
     const ownAbilities = abilities.filter(a => (a.entity_slug || 'player') === 'player');
@@ -146,11 +147,11 @@ function resolveToken(token, charState) {
         return t ? t.name : '—';
     }
     if (token === 'titles')
-        return ownAbilities.filter(a => a.category === 'title').map(a => a.name).join(', ') || 'None';
+        return ownAbilities.filter(a => a.category === 'title').map(a => a.name).join(', ') || emptyLabel;
     if (token === 'boons')
-        return ownAbilities.filter(a => a.category === 'boon').map(a => a.name).join(', ') || 'None';
+        return ownAbilities.filter(a => a.category === 'boon').map(a => a.name).join(', ') || emptyLabel;
     if (token === 'abilities')
-        return ownAbilities.filter(a => a.category !== 'title').map(a => a.name).join(', ') || 'None';
+        return ownAbilities.filter(a => a.category !== 'title').map(a => a.name).join(', ') || emptyLabel;
 
     // ── Currency: {currency} (all denominations) or {currency:gold} ──
     if (token === 'currency') {

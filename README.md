@@ -17,17 +17,6 @@ The tavern door groans open behind you...
 
 ---
 
-## What's new in v2
-
-v2 follows the **gm-lore-parser v9** (system-agnostic) spec:
-
-- Reads the unified **player-entity** shape — identity (`name` / `class` / `background`), `values` + `schema`, `skill_system`, `needs` meters, and the `adventurer_rank`.
-- Resolves the unified **abilities** list (`boon` / `title` / `passive` / `trait` / `evolution`) — including the active title.
-- New tokens for **currency**, **reputation**, and **needs-meter percentages**.
-- Skill-score tokens are **system-definition aware**: they use the ruleset's `score_formula` (from `[SYSTEM_DEF]`) when no per-chat formula is set.
-
----
-
 ## Features
 
 - **Live status block** prepended to every GM message, rendered in-narrative.
