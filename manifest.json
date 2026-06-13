@@ -2,7 +2,7 @@
     "display_name": "GM Narrative Header",
     "name": "gm-narrative-header",
     "version": "1.0.0",
-    "author": "your-name-here",
+    "author": "Zandao",
     "description": "Prepends a formatted in-narrative status header to every GM message, populated from the gm-lore-parser character state. Header format is system-defined via a HEADER_FORMAT block or manually configured in settings.",
     "loading_order": 20,
     "requires": [],
